@@ -1,69 +1,97 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
+// use scale::{Encode, Decode};
+
 #[ink::contract]
 mod erc20 {
+    // use ink::primitives::AccountId;
+    use ink::storage::Mapping;
 
-    /// Defines the storage of your contract.
-    /// Add new fields to the below struct in order
-    /// to add new static storage fields to your contract.
     #[ink(storage)]
     pub struct Erc20 {
-        /// Stores a single `bool` value on the storage.
-        value: bool,
+        total_supply: Balance,
+        balances: Mapping<AccountId, Balance>,
+        approval: Mapping<(AccountId, AccountId), Balance>,
+    }
+
+    #[ink(event)]
+    pub struct Transfer {
+        #[ink(topic)]
+        from: AccountId,
+        to: AccountId,
+        value: Balance,
+    }
+
+    #[ink(event)]
+    pub struct Approval{
+        owner: AccountId,
+        apender: AccountId,
+        value: Balance
+    }
+
+    #[derive(Debug, PartialEq, Eq, scale::Encode, scale::Decode)]
+    #[cfg_attr(feature = "std", derive(scale_info::TypeInfo))]
+    pub enum Error {
+        InsufficientBalance,
     }
 
     impl Erc20 {
-        /// Constructor that initializes the `bool` value to the given `init_value`.
         #[ink(constructor)]
-        pub fn new(init_value: bool) -> Self {
-            Self { value: init_value }
+        pub fn new(total_supply: Balance) -> Self {
+            let mut balances = Mapping::default();
+            // let sender = Self::env().sender();
+            let sender = Self::env().caller();
+
+            balances.insert(&sender, &total_supply);
+
+            Self::env().emit_event(
+                Transfer{
+                    from: AccountId::default(),
+                    to: sender,
+                    value: total_supply
+                }
+            );
+
+            Self {
+                total_supply,
+                balances,
+                approval: Default::default(),
+            }
         }
 
-        /// Constructor that initializes the `bool` value to `false`.
-        ///
-        /// Constructors can delegate to other constructors.
-        #[ink(constructor)]
-        pub fn default() -> Self {
-            Self::new(Default::default())
-        }
-
-        /// A message that can be called on instantiated contracts.
-        /// This one flips the value of the stored `bool` from `true`
-        /// to `false` and vice versa.
         #[ink(message)]
-        pub fn flip(&mut self) {
-            self.value = !self.value;
+        pub fn total_supply(&self) -> Balance {
+            self.total_supply
         }
 
-        /// Simply returns the current value of our `bool`.
         #[ink(message)]
-        pub fn get(&self) -> bool {
-            self.value
-        }
-    }
-
-    /// Unit tests in Rust are normally defined within such a `#[cfg(test)]`
-    /// module and test functions are marked with a `#[test]` attribute.
-    /// The below code is technically just normal Rust code.
-    #[cfg(test)]
-    mod tests {
-        /// Imports all the definitions from the outer scope so we can use them here.
-        use super::*;
-
-        /// We test if the default constructor does its job.
-        #[ink::test]
-        fn default_works() {
-            let erc20 = Erc20::default();
-            assert_eq!(erc20.get(), false);
+        pub fn balance_of(&self, who: AccountId) -> Balance {
+            self.balances.get(&who).unwrap_or_default()
         }
 
-        /// We test a simple use case of our contract.
-        #[ink::test]
-        fn it_works() {
-            let mut erc20 = Erc20::new(false);
-            assert_eq!(erc20.get(), false);
-            erc20.flip();
-            assert_eq!(erc20.get(), true);
+        #[ink(message)]
+        pub fn transfer(&mut self, to: AccountId, value:Balance) -> core::result::Result<(), Error> {
+            // let from = self.env().sender();
+            let from = self.env().caller();
+            let from_balance = self.balance_of(from);
+            if from_balance < value {
+                // return Err("insufficient balance".to_owned());
+                return Err(Error::InsufficientBalance)
+            }
+
+            self.balances.insert(&from, &(from_balance - value));
+            let to_balance = self.balance_of(to);
+            self.balances.insert(&to, &(to_balance + value));
+
+            Self::env().emit_event(
+                Transfer{
+                    from,
+                    to,
+                    value,
+                }
+            );
+
+            Ok(())
         }
     }
 }
